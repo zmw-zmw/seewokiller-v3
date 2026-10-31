@@ -1,0 +1,2 @@
+重置VNC
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& { Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force; & 'C:\Program Files (x86)\Seewo\SeewoGuestTool\SeewoGuestTool_2.4.3.5831\reset_vnc.ps1' -Password '88888888' }"

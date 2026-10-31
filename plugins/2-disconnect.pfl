@@ -1,0 +1,2 @@
+脱控
+netsh advfirewall set allprofiles firewallpolicy allowinbound,allowoutbound & netsh advfirewall firewall add rule name='Block_3_IPs' dir=in action=block remoteip=172.16.20.1,172.17.21.1,172.16.24.176

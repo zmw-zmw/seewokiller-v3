@@ -1,0 +1,2 @@
+被控
+netsh advfirewall firewall delete rule name='Block_3_IPs'

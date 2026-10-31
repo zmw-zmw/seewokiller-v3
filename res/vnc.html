@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VNC Viewer</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: #141923;
+      color: #dcdcdc;
+      font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif;
+      overflow: hidden;
+    }
+
+    /* ---- Toolbar ---- */
+    .vnc-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 16px;
+      background: #1e232d;
+      border-bottom: 1px solid #32373f;
+      user-select: none;
+    }
+
+    .vnc-toolbar .title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #dcdcdc;
+      flex: 1;
+    }
+
+    .vnc-toolbar .status {
+      font-size: 12px;
+      padding: 2px 10px;
+      border-radius: 10px;
+      font-weight: 500;
+    }
+
+    .status-connected {
+      background: rgba(0, 200, 83, 0.15);
+      color: #00c853;
+      border: 1px solid #00c853;
+    }
+
+    .status-connecting {
+      background: rgba(255, 185, 0, 0.15);
+      color: #ffb900;
+      border: 1px solid #ffb900;
+      animation: blink-status 1s infinite;
+    }
+
+    .status-disconnected {
+      background: rgba(255, 40, 40, 0.15);
+      color: #ff2828;
+      border: 1px solid #ff2828;
+    }
+
+    @keyframes blink-status {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.5; }
+    }
+
+    .toolbar-btn {
+      height: 30px;
+      padding: 0 14px;
+      border: 1px solid #32373f;
+      border-radius: 4px;
+      background: #282d37;
+      color: #dcdcdc;
+      font-size: 12px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s;
+    }
+
+    .toolbar-btn:hover {
+      background: #32373f;
+    }
+
+    .toolbar-btn.btn-disconnect {
+      background: #ff2828;
+      border-color: #c81e1e;
+      color: #fff;
+    }
+
+    .toolbar-btn.btn-disconnect:hover {
+      background: #ff3f3f;
+    }
+
+    .toolbar-btn.btn-fullscreen {
+      background: #0078d7;
+      border-color: #005ab4;
+      color: #fff;
+    }
+
+    .toolbar-btn.btn-fullscreen:hover {
+      background: #1a8ae8;
+    }
+
+    /* ---- VNC Container ---- */
+    #vnc-container {
+      width: 100%;
+      height: calc(100vh - 46px);
+      background: #0a0e14;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #vnc-screen {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* ---- Loading / Error Overlay ---- */
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(20, 25, 35, 0.9);
+      z-index: 10;
+    }
+
+    .overlay.hidden {
+      display: none;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid #32373f;
+      border-top-color: #0078d7;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 16px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .overlay-text {
+      font-size: 14px;
+      color: #a0a0a0;
+    }
+
+    .overlay-error {
+      color: #ff2828;
+    }
+
+    .retry-btn {
+      margin-top: 16px;
+      height: 34px;
+      padding: 0 20px;
+      background: #0078d7;
+      border: 1px solid #005ab4;
+      border-radius: 4px;
+      color: #fff;
+      font-size: 13px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .retry-btn:hover {
+      background: #1a8ae8;
+    }
+  </style>
+</head>
+<body>
+  <!-- Toolbar -->
+  <div class="vnc-toolbar">
+    <span class="title" id="vncTitle">VNC Viewer</span>
+    <span class="status status-connecting" id="vncStatus">连接中...</span>
+    <button class="toolbar-btn btn-fullscreen" id="btnFullscreen" title="全屏">全屏</button>
+    <button class="toolbar-btn btn-disconnect" id="btnDisconnect">断开</button>
+  </div>
+
+  <!-- VNC Display -->
+  <div id="vnc-container">
+    <div id="vnc-screen"></div>
+
+    <!-- Loading Overlay -->
+    <div class="overlay" id="loadingOverlay">
+      <div class="spinner"></div>
+      <div class="overlay-text">正在连接 VNC 服务器...</div>
+    </div>
+
+    <!-- Error Overlay -->
+    <div class="overlay hidden" id="errorOverlay">
+      <div class="overlay-text overlay-error" id="errorText">连接失败</div>
+      <button class="retry-btn" id="btnRetry">重试</button>
+    </div>
+  </div>
+
+  <script type="module">
+    import RFB from '/novnc/core/rfb.js';
+
+    // ========== Parse URL params ==========
+    const urlParams = new URLSearchParams(window.location.search);
+    const host = urlParams.get('host') || '127.0.0.1';
+    const port = urlParams.get('port') || '6080';
+    const password = urlParams.get('password') || '88888888';
+    const title = urlParams.get('title') || 'VNC';
+
+    // ========== DOM ==========
+    const elTitle = document.getElementById('vncTitle');
+    const elStatus = document.getElementById('vncStatus');
+    const elContainer = document.getElementById('vnc-screen');
+    const elLoading = document.getElementById('loadingOverlay');
+    const elError = document.getElementById('errorOverlay');
+    const elErrorText = document.getElementById('errorText');
+    const btnDisconnect = document.getElementById('btnDisconnect');
+    const btnFullscreen = document.getElementById('btnFullscreen');
+    const btnRetry = document.getElementById('btnRetry');
+
+    let rfb = null;
+
+    // ========== Set title ==========
+    elTitle.textContent = `VNC - ${title}`;
+
+    // ========== Status helpers ==========
+    function setStatus(type, text) {
+      elStatus.className = `status status-${type}`;
+      elStatus.textContent = text;
+    }
+
+    function showLoading() {
+      elLoading.classList.remove('hidden');
+      elError.classList.add('hidden');
+    }
+
+    function showError(msg) {
+      elLoading.classList.add('hidden');
+      elError.classList.remove('hidden');
+      elErrorText.textContent = msg;
+    }
+
+    function hideOverlays() {
+      elLoading.classList.add('hidden');
+      elError.classList.add('hidden');
+    }
+
+    // ========== Connect ==========
+    function connectVNC() {
+      if (rfb) {
+        rfb.disconnect();
+        rfb = null;
+      }
+
+      showLoading();
+      setStatus('connecting', '连接中...');
+
+      const url = `ws://${host}:${port}`;
+
+      try {
+        rfb = new RFB(elContainer, url, {
+          credentials: { password: password },
+          shared: true,
+          wsProtocols: ['binary'],
+        });
+
+        rfb.scaleViewport = true;
+        rfb.resizeSession = false;
+        rfb.viewOnly = false;
+        rfb.showDotCursor = true;
+
+        rfb.addEventListener('connect', () => {
+          hideOverlays();
+          setStatus('connected', '已连接');
+          console.log('[VNC] Connected to', title);
+        });
+
+        rfb.addEventListener('disconnect', (e) => {
+          const detail = e.detail || {};
+          if (detail.clean) {
+            setStatus('disconnected', '已断开');
+          } else {
+            setStatus('disconnected', '连接中断');
+            showError(`VNC 连接中断：${title}`);
+          }
+          rfb = null;
+        });
+
+        rfb.addEventListener('credentialsrequired', () => {
+          // Send credentials if required
+          rfb.sendCredentials({ password: password });
+        });
+
+        rfb.addEventListener('desktopname', (e) => {
+          const name = e.detail.name || '';
+          console.log('[VNC] Desktop name:', name);
+        });
+
+        rfb.addEventListener('securityfailure', (e) => {
+          const detail = e.detail || {};
+          const reason = detail.reason || detail.msg || '认证失败';
+          showError(`VNC 认证失败：${reason}`);
+          setStatus('disconnected', '认证失败');
+          rfb = null;
+        });
+
+      } catch (err) {
+        console.error('[VNC] Connection error:', err);
+        showError(`VNC 连接错误：${err.message}`);
+        setStatus('disconnected', '连接失败');
+      }
+    }
+
+    // ========== Toolbar Actions ==========
+    btnDisconnect.addEventListener('click', () => {
+      if (rfb) {
+        rfb.disconnect();
+        rfb = null;
+      }
+      setStatus('disconnected', '已断开');
+      showError('VNC 连接已断开');
+    });
+
+    btnFullscreen.addEventListener('click', () => {
+      if (document.fullscreenElement) {
+        document.exitFullscreen();
+      } else {
+        document.documentElement.requestFullscreen();
+      }
+    });
+
+    btnRetry.addEventListener('click', () => {
+      connectVNC();
+    });
+
+    // ========== Start ==========
+    connectVNC();
+  </script>
+</body>
+</html>
